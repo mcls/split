@@ -34,7 +34,11 @@ module Split
         cookie_key = :split.to_s
         cookie_value = default_options.merge(value: JSON.generate(value))
         if action_dispatch?
-          @context.cookies[cookie_key] = cookie_value
+          if respond_to?(:cookies)
+            @context.cookies[cookie_key] = cookie_value
+          else
+            @context.send(:cookies)[cookie_key] = cookie_value
+          end
         else
           set_cookie_via_rack(cookie_key, cookie_value)
         end

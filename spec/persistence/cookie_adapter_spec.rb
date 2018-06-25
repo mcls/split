@@ -10,20 +10,35 @@ describe Split::Persistence::CookieAdapter do
   let(:context) { double(request: request, response: response, cookies: CookiesMock.new) }
   subject { Split::Persistence::CookieAdapter.new(context) }
 
-  describe "#[] and #[]=" do
-    it "should set and return the value for given key" do
-      subject["my_key"] = "my_value"
-      expect(subject["my_key"]).to eq("my_value")
+  shared_examples "sets cookies correctly" do
+    describe "#[] and #[]=" do
+      it "set and return the value for given key" do
+        subject["my_key"] = "my_value"
+        expect(subject["my_key"]).to eq("my_value")
+      end
+
+      it "handles invalid JSON" do
+        context.request.cookies[:split] = {
+          :value => '{"foo":2,',
+          :expires => Time.now
+        }
+        expect(subject["my_key"]).to be_nil
+        subject["my_key"] = "my_value"
+        expect(subject["my_key"]).to eq("my_value")
+      end
+    end
+
+    describe "#delete" do
+      it "should delete the given key" do
+        subject["my_key"] = "my_value"
+        subject.delete("my_key")
+        expect(subject["my_key"]).to be_nil
+      end
     end
   end
 
-  describe "#delete" do
-    it "should delete the given key" do
-      subject["my_key"] = "my_value"
-      subject.delete("my_key")
-      expect(subject["my_key"]).to be_nil
-    end
-  end
+  include_examples "sets cookies correctly"
+
 
   describe "#keys" do
     it "should return an array of the session's stored keys" do
@@ -31,13 +46,6 @@ describe Split::Persistence::CookieAdapter do
       subject["my_second_key"] = "my_second_value"
       expect(subject.keys).to match(["my_key", "my_second_key"])
     end
-  end
-
-  it "handles invalid JSON" do
-    context.request.cookies[:split] = { :value => '{"foo":2,', :expires => Time.now }
-    expect(subject["my_key"]).to be_nil
-    subject["my_key"] = "my_value"
-    expect(subject["my_key"]).to eq("my_value")
   end
 
   it "puts multiple experiments in a single cookie" do
@@ -53,10 +61,36 @@ describe Split::Persistence::CookieAdapter do
     expect(context.response.headers["Set-Cookie"]).to include("split=")
   end
 
-  it "uses ActionDispatch::Cookie when available for cookie writing" do
-    allow(subject).to receive(:action_dispatch?).and_return(true)
-    subject["foo"] = "FOO"
-    expect(subject['foo']).to eq('FOO')
-  end
+  context "when @context is an ActionController::Base" do
+    before :context do
+      require "rails"
+      require "action_controller/railtie"
+    end
 
+    subject(:adapter) { described_class.new(context) }
+
+    let(:context) do
+      controller = controller_class.new
+      if controller.respond_to?(:set_request!)
+        controller.set_request!(ActionDispatch::Request.new({}))
+      else # Before rails 5.0
+        controller.send(:"request=", ActionDispatch::Request.new({}))
+      end
+
+      response = ActionDispatch::Response.new(200, {}, '').tap do |res|
+        res.request = controller.request
+      end
+
+      if controller.respond_to?(:set_response!)
+        controller.set_response!(response)
+      else # Before rails 5.0
+        controller.send(:set_response!, response)
+      end
+      controller
+    end
+
+    let(:controller_class) { Class.new(ActionController::Base) }
+
+    include_examples "sets cookies correctly"
+  end
 end
